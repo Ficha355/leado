@@ -17,6 +17,9 @@ import praw
 import anthropic
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +38,9 @@ def _reddit() -> praw.Reddit | None:
     )
 
 def _youtube():
-    key = os.environ.get("GOOGLE_API_KEY", "")
+    key = os.environ.get("YOUTUBE_API_KEY", "")
     if not key:
-        log.warning("GOOGLE_API_KEY missing — skipping YouTube scrape.")
+        log.warning("YOUTUBE_API_KEY missing — skipping YouTube scrape.")
         return None
     return build("youtube", "v3", developerKey=key)
 
