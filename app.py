@@ -1,10 +1,14 @@
 import os
+import logging
 import stripe
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from db import db, User, Search, Lead
+from scraper import run_pipeline
+
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
@@ -124,16 +128,72 @@ def dashboard():
 @app.route("/search", methods=["POST"])
 @login_required
 def run_search():
-    data = request.get_json()
-    query = data.get("query", "").strip()
-    sources = data.get("sources", ["reddit", "youtube", "google"])
-    if not query:
-        return jsonify({"error": "Requête vide."}), 400
-    search = Search(user_id=current_user.id, query=query, sources=sources)
+    data = request.get_json(silent=True) or {}
+    product = data.get("query", "").strip()
+    sources = data.get("sources", ["reddit", "youtube"])
+
+    if not product:
+        return jsonify({"error": "Décris ce que tu vends."}), 400
+
+    # Enforce plan limits
+    used = current_user.searches.count()
+    limit = current_user.monthly_search_limit
+    if limit != 99999 and used >= limit:
+        return jsonify({"error": f"Limite mensuelle atteinte ({limit} recherches). Upgrade ton plan."}), 403
+
+    search = Search(user_id=current_user.id, query=product, sources=sources, status="running")
     db.session.add(search)
     db.session.commit()
-    # In production, enqueue to Celery: run_search_task.delay(search.id)
-    return jsonify({"search_id": search.id, "status": "queued"})
+
+    try:
+        raw_leads = run_pipeline(product, sources)
+    except Exception as exc:
+        search.status = "failed"
+        db.session.commit()
+        return jsonify({"error": f"Erreur pipeline : {exc}"}), 500
+
+    saved_leads = []
+    for rl in raw_leads:
+        lead = Lead(
+            user_id=current_user.id,
+            search_id=search.id,
+            source=rl["source"],
+            source_url=rl.get("source_url"),
+            author=rl.get("author"),
+            content_snippet=rl.get("content_snippet"),
+            intent_score=rl.get("intent_score", 0) / 100,  # store as 0.0–1.0
+            intent_label=rl.get("intent_label", "cold"),
+            ai_summary=rl.get("ai_summary"),
+            suggested_reply=rl.get("suggested_reply"),
+        )
+        db.session.add(lead)
+        saved_leads.append(lead)
+
+    search.status = "done"
+    search.result_count = len(saved_leads)
+    db.session.commit()
+
+    return jsonify({
+        "search_id": search.id,
+        "count": len(saved_leads),
+        "leads": [_lead_to_dict(l) for l in saved_leads],
+    })
+
+
+def _lead_to_dict(lead: Lead) -> dict:
+    return {
+        "id": lead.id,
+        "source": lead.source,
+        "source_url": lead.source_url,
+        "author": lead.author,
+        "content_snippet": lead.content_snippet,
+        "intent_score": round((lead.intent_score or 0) * 100),
+        "intent_label": lead.intent_label,
+        "ai_summary": lead.ai_summary,
+        "suggested_reply": lead.suggested_reply,
+        "is_saved": lead.is_saved,
+        "is_contacted": lead.is_contacted,
+    }
 
 
 @app.route("/leads")
@@ -146,8 +206,23 @@ def leads():
         q = q.filter_by(intent_label=label)
     if source:
         q = q.filter_by(source=source)
-    results = q.order_by(Lead.intent_score.desc()).paginate(page=request.args.get("page", 1, type=int), per_page=25)
+    results = q.order_by(Lead.intent_score.desc()).paginate(
+        page=request.args.get("page", 1, type=int), per_page=25
+    )
     return render_template("leads.html", leads=results)
+
+
+@app.route("/api/leads/<int:search_id>")
+@login_required
+def api_leads_by_search(search_id):
+    search = Search.query.filter_by(id=search_id, user_id=current_user.id).first_or_404()
+    leads = Lead.query.filter_by(search_id=search_id).order_by(Lead.intent_score.desc()).all()
+    return jsonify({
+        "search_id": search_id,
+        "status": search.status,
+        "count": len(leads),
+        "leads": [_lead_to_dict(l) for l in leads],
+    })
 
 
 @app.route("/leads/<int:lead_id>/save", methods=["POST"])
@@ -157,6 +232,15 @@ def save_lead(lead_id):
     lead.is_saved = not lead.is_saved
     db.session.commit()
     return jsonify({"saved": lead.is_saved})
+
+
+@app.route("/leads/<int:lead_id>/contact", methods=["POST"])
+@login_required
+def mark_contacted(lead_id):
+    lead = Lead.query.filter_by(id=lead_id, user_id=current_user.id).first_or_404()
+    lead.is_contacted = True
+    db.session.commit()
+    return jsonify({"contacted": True})
 
 
 # ── Billing ───────────────────────────────────────────────────────────────────

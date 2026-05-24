@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Leado</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --red: #E02020; --red-bg: #FEF2F2;
+      --black: #0A0A0A; --gray-900: #111;
+      --gray-700: #374151; --gray-500: #6B7280;
+      --gray-300: #D1D5DB; --gray-100: #F3F4F6; --gray-50: #F9FAFB;
+      --white: #fff;
+      --hot: #DC2626; --hot-bg: #FEF2F2;
+      --warm: #D97706; --warm-bg: #FFFBEB;
+      --cold: #6B7280; --cold-bg: #F3F4F6;
+      --green: #16A34A; --green-bg: #F0FDF4;
+      --radius: 10px; --radius-lg: 16px;
+      --shadow: 0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+    }
+    html { background: var(--gray-50); color: var(--black); font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    body { display: flex; min-height: 100vh; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 220px; flex-shrink: 0; background: var(--white);
+      border-right: 1px solid var(--gray-100); padding: 24px 16px;
+      display: flex; flex-direction: column; position: fixed; top: 0; bottom: 0; left: 0;
+    }
+    .sidebar-logo {
+      font-size: 20px; font-weight: 900; letter-spacing: -0.04em;
+      color: var(--black); text-decoration: none; margin-bottom: 32px;
+      display: block; padding: 0 8px;
+    }
+    .sidebar-logo span { color: var(--red); }
+    .nav-section { font-size: 11px; font-weight: 700; color: var(--gray-300); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 8px; margin-bottom: 8px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+      border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--gray-700);
+      text-decoration: none; transition: background 0.15s, color 0.15s; margin-bottom: 2px;
+    }
+    .nav-item:hover, .nav-item.active { background: var(--gray-50); color: var(--black); }
+    .nav-item.active { font-weight: 600; }
+    .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+    .sidebar-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--gray-100); }
+    .user-chip {
+      display: flex; align-items: center; gap: 10px; padding: 10px;
+      border-radius: 8px; cursor: pointer; transition: background 0.15s;
+    }
+    .user-chip:hover { background: var(--gray-50); }
+    .user-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--gray-100); border: 1px solid var(--gray-200);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: var(--gray-700); flex-shrink: 0;
+    }
+    .user-name { font-size: 13px; font-weight: 600; color: var(--black); }
+    .user-plan { font-size: 11px; color: var(--gray-500); text-transform: capitalize; }
+    .plan-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 100px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .plan-free  { background: var(--gray-100); color: var(--gray-500); }
+    .plan-starter { background: #EFF6FF; color: #3B82F6; }
+    .plan-pro   { background: #F0FDF4; color: var(--green); }
+    .plan-agency { background: #FDF4FF; color: #9333EA; }
+
+    /* ── Main ── */
+    .main { margin-left: 220px; flex: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+    /* ── Topbar ── */
+    .topbar {
+      background: var(--white); border-bottom: 1px solid var(--gray-100);
+      padding: 0 32px; height: 60px; display: flex; align-items: center;
+      justify-content: space-between; flex-shrink: 0;
+    }
+    .topbar-title { font-size: 16px; font-weight: 700; color: var(--black); }
+    .topbar-actions { display: flex; align-items: center; gap: 10px; }
+    .btn-sm {
+      padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      text-decoration: none; transition: all 0.15s; cursor: pointer; font-family: inherit;
+      border: none;
+    }
+    .btn-outline { border: 1px solid var(--gray-300); color: var(--gray-700); background: var(--white); }
+    .btn-outline:hover { border-color: var(--black); color: var(--black); }
+    .btn-red { background: var(--red); color: var(--white); }
+    .btn-red:hover { background: #B91C1C; }
+
+    /* ── Content ── */
+    .content { padding: 32px; flex: 1; }
+
+    /* ── Stats row ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--white); border: 1px solid var(--gray-100);
+      border-radius: var(--radius-lg); padding: 24px 22px; box-shadow: var(--shadow);
+    }
+    .stat-label { font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .stat-value { font-size: 32px; font-weight: 900; letter-spacing: -0.04em; color: var(--black); line-height: 1; }
+    .stat-value.red { color: var(--red); }
+    .stat-sub { font-size: 12px; color: var(--gray-500); margin-top: 6px; }
+
+    /* ── Search box ── */
+    .search-card {
+      background: var(--white); border: 1px solid var(--gray-100);
+      border-radius: var(--radius-lg); padding: 28px 28px 24px;
+      box-shadow: var(--shadow); margin-bottom: 28px;
+    }
+    .search-label { font-size: 14px; font-weight: 700; color: var(--black); margin-bottom: 4px; }
+    .search-hint { font-size: 13px; color: var(--gray-500); margin-bottom: 16px; }
+    .search-row { display: flex; gap: 10px; }
+    .search-input {
+      flex: 1; padding: 13px 16px; border-radius: var(--radius);
+      border: 1px solid var(--gray-300); background: var(--white);
+      font-size: 15px; font-family: inherit; color: var(--black);
+      transition: border-color 0.15s; outline: none;
+    }
+    .search-input:focus { border-color: var(--black); }
+    .search-input::placeholder { color: var(--gray-300); }
+    .btn-search {
+      padding: 13px 24px; border-radius: var(--radius);
+      background: var(--black); color: var(--white);
+      font-size: 14px; font-weight: 700; border: none; cursor: pointer;
+      font-family: inherit; white-space: nowrap; transition: background 0.15s;
+    }
+    .btn-search:hover:not(:disabled) { background: #222; }
+    .btn-search:disabled { opacity: 0.5; cursor: not-allowed; }
+    .source-toggles { display: flex; gap: 8px; margin-top: 14px; }
+    .source-toggle {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 100px;
+      border: 1px solid var(--gray-300); font-size: 13px; font-weight: 500;
+      color: var(--gray-700); cursor: pointer; user-select: none; transition: all 0.15s;
+    }
+    .source-toggle input { display: none; }
+    .source-toggle.checked { border-color: var(--black); background: var(--black); color: var(--white); }
+
+    /* ── Search status ── */
+    .search-status {
+      display: none; align-items: center; gap: 12px;
+      padding: 14px 18px; border-radius: var(--radius);
+      background: var(--gray-50); border: 1px solid var(--gray-100);
+      font-size: 14px; color: var(--gray-700); margin-top: 14px;
+    }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid var(--gray-300);
+      border-top-color: var(--black); border-radius: 50%;
+      animation: spin 0.7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Results ── */
+    .results-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .results-title { font-size: 15px; font-weight: 700; color: var(--black); }
+    .results-count { font-size: 13px; color: var(--gray-500); }
+    .filter-tabs { display: flex; gap: 4px; }
+    .filter-tab {
+      padding: 6px 12px; border-radius: 100px; font-size: 13px; font-weight: 500;
+      color: var(--gray-500); cursor: pointer; border: 1px solid transparent;
+      transition: all 0.15s; background: none;
+    }
+    .filter-tab:hover { color: var(--black); }
+    .filter-tab.active { background: var(--black); color: var(--white); }
+
+    /* ── Lead cards ── */
+    .leads-list { display: flex; flex-direction: column; gap: 12px; }
+    .lead-card {
+      background: var(--white); border: 1px solid var(--gray-100);
+      border-radius: var(--radius-lg); padding: 22px 24px;
+      box-shadow: var(--shadow); transition: box-shadow 0.15s, transform 0.15s;
+    }
+    .lead-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+    .lead-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .lead-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .lead-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 100px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .badge-hot  { background: var(--hot-bg);  color: var(--hot); }
+    .badge-warm { background: var(--warm-bg); color: var(--warm); }
+    .badge-cold { background: var(--cold-bg); color: var(--cold); }
+    .lead-source {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 600; color: var(--gray-500);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .lead-author { font-size: 13px; color: var(--gray-500); }
+    .lead-score-ring {
+      flex-shrink: 0; width: 48px; height: 48px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 800; border: 2px solid;
+    }
+    .ring-hot  { border-color: var(--hot);  color: var(--hot);  background: var(--hot-bg); }
+    .ring-warm { border-color: var(--warm); color: var(--warm); background: var(--warm-bg); }
+    .ring-cold { border-color: var(--gray-300); color: var(--cold); background: var(--cold-bg); }
+
+    .lead-snippet {
+      font-size: 14px; color: var(--gray-700); line-height: 1.65;
+      margin-bottom: 14px; padding: 12px 14px;
+      background: var(--gray-50); border-radius: 8px; border-left: 3px solid var(--gray-200);
+    }
+    .lead-summary { font-size: 13px; color: var(--gray-500); margin-bottom: 16px; font-style: italic; }
+
+    .lead-reply {
+      background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: var(--radius);
+      padding: 14px 16px; margin-bottom: 16px;
+    }
+    .lead-reply-label { font-size: 11px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .lead-reply-text { font-size: 13px; color: var(--gray-700); line-height: 1.6; }
+
+    .lead-actions { display: flex; align-items: center; gap: 8px; }
+    .lead-action {
+      padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--gray-300); background: var(--white);
+      color: var(--gray-700); transition: all 0.15s; font-family: inherit;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 5px;
+    }
+    .lead-action:hover { border-color: var(--black); color: var(--black); }
+    .lead-action.saved { border-color: #F59E0B; color: #D97706; background: #FFFBEB; }
+    .lead-action.contacted { border-color: var(--green); color: var(--green); background: var(--green-bg); }
+    .lead-link { font-size: 13px; color: var(--gray-500); text-decoration: none; margin-left: auto; }
+    .lead-link:hover { color: var(--black); }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center; padding: 72px 24px;
+      background: var(--white); border: 1px solid var(--gray-100);
+      border-radius: var(--radius-lg); color: var(--gray-500);
+    }
+    .empty-icon { font-size: 40px; margin-bottom: 16px; }
+    .empty h3 { font-size: 16px; font-weight: 700; color: var(--black); margin-bottom: 8px; }
+    .empty p { font-size: 14px; line-height: 1.6; max-width: 340px; margin: 0 auto; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 999;
+      padding: 12px 20px; border-radius: var(--radius); background: var(--black); color: var(--white);
+      font-size: 14px; font-weight: 500; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      transform: translateY(8px); opacity: 0; transition: all 0.3s;
+    }
+    .toast.show { transform: none; opacity: 1; }
+
+    @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(2,1fr); } }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <a href="/" class="sidebar-logo">leado<span>.</span></a>
+  <div class="nav-section">Menu</div>
+  <a href="/dashboard" class="nav-item active">
+    <span class="nav-icon">🎯</span> Recherche
+  </a>
+  <a href="/leads" class="nav-item">
+    <span class="nav-icon">📋</span> Tous les leads
+  </a>
+  <a href="/leads?is_saved=1" class="nav-item">
+    <span class="nav-icon">⭐</span> Sauvegardés
+  </a>
+  <div class="nav-section" style="margin-top:20px;">Compte</div>
+  <a href="/billing/portal" class="nav-item">
+    <span class="nav-icon">💳</span> Abonnement
+  </a>
+  <a href="/logout" class="nav-item">
+    <span class="nav-icon">→</span> Déconnexion
+  </a>
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="user-avatar">{{ current_user.full_name[0].upper() if current_user.full_name else current_user.email[0].upper() }}</div>
+      <div>
+        <div class="user-name">{{ current_user.full_name or current_user.email.split('@')[0] }}</div>
+        <span class="plan-badge plan-{{ current_user.plan }}">{{ current_user.plan }}</span>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ── Main ── -->
+<div class="main">
+  <div class="topbar">
+    <span class="topbar-title">Dashboard</span>
+    <div class="topbar-actions">
+      {% if current_user.plan == 'free' %}
+      <a href="/#pricing" class="btn-sm btn-red">⚡ Upgrader</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Recherches</div>
+        <div class="stat-value">{{ stats.total_searches }}</div>
+        <div class="stat-sub">/ {{ current_user.monthly_search_limit if current_user.monthly_search_limit != 99999 else '∞' }} ce mois</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Leads trouvés</div>
+        <div class="stat-value">{{ stats.total_leads }}</div>
+        <div class="stat-sub">toutes sources confondues</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Leads chauds 🔥</div>
+        <div class="stat-value red">{{ stats.hot_leads }}</div>
+        <div class="stat-sub">prêts à être contactés</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Sauvegardés</div>
+        <div class="stat-value">{{ stats.saved_leads }}</div>
+        <div class="stat-sub">dans ta liste</div>
+      </div>
+    </div>
+
+    <!-- Search box -->
+    <div class="search-card">
+      <div class="search-label">Nouvelle recherche de prospects</div>
+      <div class="search-hint">Décris ce que tu vends — Leado trouve les gens qui en ont besoin maintenant.</div>
+      <div class="search-row">
+        <input
+          id="searchInput"
+          class="search-input"
+          type="text"
+          placeholder="ex: montage vidéo TikTok pour marques e-commerce"
+          maxlength="300"
+        />
+        <button id="searchBtn" class="btn-search" onclick="startSearch()">
+          Trouver des prospects →
+        </button>
+      </div>
+      <div class="source-toggles">
+        <label class="source-toggle checked" id="toggle-reddit">
+          <input type="checkbox" value="reddit" checked onchange="syncToggle(this)" />
+          🟠 Reddit
+        </label>
+        <label class="source-toggle checked" id="toggle-youtube">
+          <input type="checkbox" value="youtube" checked onchange="syncToggle(this)" />
+          🔴 YouTube
+        </label>
+      </div>
+      <div class="search-status" id="searchStatus">
+        <div class="spinner"></div>
+        <span id="searchStatusText">Génération des requêtes de recherche…</span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsSection" style="display:none;">
+      <div class="results-header">
+        <div>
+          <div class="results-title" id="resultsTitle">Résultats</div>
+          <div class="results-count" id="resultsCount"></div>
+        </div>
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="filterLeads('all', this)">Tous</button>
+          <button class="filter-tab" onclick="filterLeads('hot', this)">🔥 Hot</button>
+          <button class="filter-tab" onclick="filterLeads('warm', this)">⚡ Warm</button>
+          <button class="filter-tab" onclick="filterLeads('cold', this)">❄️ Cold</button>
+        </div>
+      </div>
+      <div class="leads-list" id="leadsList"></div>
+    </div>
+
+    <!-- Previous searches leads (on load) -->
+    {% if hot_leads %}
+    <div id="previousSection">
+      <div class="results-header">
+        <div>
+          <div class="results-title">Derniers leads chauds 🔥</div>
+          <div class="results-count">{{ hot_leads|length }} lead{{ 's' if hot_leads|length > 1 }}</div>
+        </div>
+      </div>
+      <div class="leads-list">
+        {% for lead in hot_leads %}
+        <div class="lead-card" data-label="{{ lead.intent_label }}" data-id="{{ lead.id }}">
+          <div class="lead-top">
+            <div class="lead-meta">
+              <span class="lead-badge badge-{{ lead.intent_label }}">
+                {% if lead.intent_label == 'hot' %}🔥{% elif lead.intent_label == 'warm' %}⚡{% else %}❄️{% endif %}
+                {{ lead.intent_label|upper }}
+              </span>
+              <span class="lead-source">
+                {% if lead.source == 'reddit' %}🟠{% else %}🔴{% endif %}
+                {{ lead.source|upper }}
+              </span>
+              <span class="lead-author">{{ lead.author }}</span>
+            </div>
+            <div class="lead-score-ring ring-{{ lead.intent_label }}">{{ (lead.intent_score * 100)|int }}</div>
+          </div>
+          <div class="lead-snippet">{{ lead.content_snippet }}</div>
+          {% if lead.ai_summary %}
+          <div class="lead-summary">{{ lead.ai_summary }}</div>
+          {% endif %}
+          {% if lead.suggested_reply %}
+          <div class="lead-reply">
+            <div class="lead-reply-label">💬 Message suggéré</div>
+            <div class="lead-reply-text">{{ lead.suggested_reply }}</div>
+          </div>
+          {% endif %}
+          <div class="lead-actions">
+            <button class="lead-action {% if lead.is_saved %}saved{% endif %}" onclick="toggleSave({{ lead.id }}, this)">
+              {% if lead.is_saved %}⭐ Sauvegardé{% else %}☆ Sauvegarder{% endif %}
+            </button>
+            {% if lead.is_contacted %}
+            <button class="lead-action contacted" disabled>✓ Contacté</button>
+            {% else %}
+            <button class="lead-action" onclick="markContacted({{ lead.id }}, this)">Marquer contacté</button>
+            {% endif %}
+            <a href="{{ lead.source_url }}" target="_blank" class="lead-link">Voir le post ↗</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">🎯</div>
+      <h3>Lance ta première recherche</h3>
+      <p>Décris ce que tu vends ci-dessus — Leado scrape Reddit et YouTube pour trouver tes prochains clients en temps réel.</p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  let allLeads = [];
+  let currentFilter = 'all';
+
+  function syncToggle(checkbox) {
+    const label = checkbox.closest('.source-toggle');
+    label.classList.toggle('checked', checkbox.checked);
+  }
+
+  function getSelectedSources() {
+    return Array.from(document.querySelectorAll('.source-toggle input:checked')).map(i => i.value);
+  }
+
+  function showToast(msg, duration = 3000) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+  }
+
+  function setStatus(visible, text) {
+    const el = document.getElementById('searchStatus');
+    el.style.display = visible ? 'flex' : 'none';
+    if (text) document.getElementById('searchStatusText').textContent = text;
+  }
+
+  async function startSearch() {
+    const query = document.getElementById('searchInput').value.trim();
+    if (!query) { document.getElementById('searchInput').focus(); return; }
+    const sources = getSelectedSources();
+    if (!sources.length) { showToast('Sélectionne au moins une source.'); return; }
+
+    const btn = document.getElementById('searchBtn');
+    btn.disabled = true;
+    btn.textContent = 'Recherche en cours…';
+    setStatus(true, 'Génération des requêtes de recherche avec IA…');
+    document.getElementById('resultsSection').style.display = 'none';
+    const prev = document.getElementById('previousSection');
+    if (prev) prev.style.display = 'none';
+    const empty = document.getElementById('emptyState');
+    if (empty) empty.style.display = 'none';
+
+    // Progress messages to reassure the user while waiting
+    const messages = [
+      'Génération des requêtes de recherche avec IA…',
+      'Scraping Reddit en temps réel…',
+      'Scraping YouTube…',
+      'Analyse et scoring des leads avec Claude…',
+      'Génération des messages d\'approche…',
+    ];
+    let mi = 0;
+    const interval = setInterval(() => {
+      mi = Math.min(mi + 1, messages.length - 1);
+      setStatus(true, messages[mi]);
+    }, 4000);
+
+    try {
+      const resp = await fetch('/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, sources }),
+      });
+      clearInterval(interval);
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        showToast('Erreur : ' + (data.error || 'inconnue'));
+        setStatus(false);
+        return;
+      }
+
+      allLeads = data.leads || [];
+      renderLeads(allLeads);
+      document.getElementById('resultsTitle').textContent = `Résultats pour "${query}"`;
+      document.getElementById('resultsCount').textContent =
+        `${allLeads.length} lead${allLeads.length > 1 ? 's' : ''} trouvé${allLeads.length > 1 ? 's' : ''}`;
+      document.getElementById('resultsSection').style.display = '';
+      setStatus(false);
+      showToast(`✓ ${allLeads.length} prospects trouvés !`);
+    } catch (err) {
+      clearInterval(interval);
+      showToast('Erreur réseau. Réessaie.');
+      setStatus(false);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Trouver des prospects →';
+    }
+  }
+
+  function filterLeads(label, btn) {
+    currentFilter = label;
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    const filtered = label === 'all' ? allLeads : allLeads.filter(l => l.intent_label === label);
+    renderLeads(filtered);
+  }
+
+  function renderLeads(leads) {
+    const list = document.getElementById('leadsList');
+    if (!leads.length) {
+      list.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><h3>Aucun lead dans cette catégorie</h3><p>Essaie un autre filtre ou affine ta recherche.</p></div>';
+      return;
+    }
+    list.innerHTML = leads.map(l => leadCardHTML(l)).join('');
+  }
+
+  function labelIcon(label) {
+    return { hot: '🔥', warm: '⚡', cold: '❄️' }[label] || '';
+  }
+  function sourceIcon(src) {
+    return src === 'reddit' ? '🟠' : '🔴';
+  }
+
+  function leadCardHTML(l) {
+    const score = l.intent_score ?? 0;
+    const replyBlock = l.suggested_reply
+      ? `<div class="lead-reply"><div class="lead-reply-label">💬 Message suggéré</div><div class="lead-reply-text">${esc(l.suggested_reply)}</div></div>`
+      : '';
+    const summaryBlock = l.ai_summary
+      ? `<div class="lead-summary">${esc(l.ai_summary)}</div>`
+      : '';
+    return `
+      <div class="lead-card" data-label="${l.intent_label}" data-id="${l.id}">
+        <div class="lead-top">
+          <div class="lead-meta">
+            <span class="lead-badge badge-${l.intent_label}">${labelIcon(l.intent_label)} ${l.intent_label.toUpperCase()}</span>
+            <span class="lead-source">${sourceIcon(l.source)} ${l.source.toUpperCase()}</span>
+            <span class="lead-author">${esc(l.author)}</span>
+          </div>
+          <div class="lead-score-ring ring-${l.intent_label}">${score}</div>
+        </div>
+        <div class="lead-snippet">${esc(l.content_snippet)}</div>
+        ${summaryBlock}
+        ${replyBlock}
+        <div class="lead-actions">
+          <button class="lead-action" onclick="toggleSave(${l.id}, this)">☆ Sauvegarder</button>
+          <button class="lead-action" onclick="markContacted(${l.id}, this)">Marquer contacté</button>
+          <a href="${l.source_url}" target="_blank" rel="noopener" class="lead-link">Voir le post ↗</a>
+        </div>
+      </div>`;
+  }
+
+  function esc(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  async function toggleSave(leadId, btn) {
+    const resp = await fetch(`/leads/${leadId}/save`, { method: 'POST' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.saved) {
+      btn.textContent = '⭐ Sauvegardé';
+      btn.classList.add('saved');
+    } else {
+      btn.textContent = '☆ Sauvegarder';
+      btn.classList.remove('saved');
+    }
+  }
+
+  async function markContacted(leadId, btn) {
+    const resp = await fetch(`/leads/${leadId}/contact`, { method: 'POST' });
+    if (!resp.ok) return;
+    btn.textContent = '✓ Contacté';
+    btn.classList.add('contacted');
+    btn.disabled = true;
+  }
+
+  // Submit on Enter
+  document.getElementById('searchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startSearch();
+  });
+</script>
+</body>
+</html>
