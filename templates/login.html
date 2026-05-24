@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connexion — Leado</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#080808;--card:#0f0f0f;--border:rgba(255,255,255,0.07);--text:#f0f0f0;--muted:#6b7280;--subtle:#9ca3af;--accent:#8b5cf6;--accent-light:#a78bfa;--radius:12px}
+    body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+    .card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:48px 40px}
+    .logo{font-size:24px;font-weight:900;background:linear-gradient(135deg,#fff 40%,var(--accent-light));-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-decoration:none;display:block;text-align:center;margin-bottom:36px}
+    h1{font-size:22px;font-weight:800;letter-spacing:-0.5px;text-align:center;margin-bottom:8px}
+    .sub{font-size:14px;color:var(--subtle);text-align:center;margin-bottom:32px}
+    label{display:block;font-size:13px;font-weight:600;color:var(--subtle);margin-bottom:6px}
+    input{width:100%;padding:13px 16px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text);font-size:15px;font-family:inherit;transition:border-color 0.2s;margin-bottom:18px}
+    input:focus{outline:none;border-color:var(--accent)}
+    .btn{width:100%;padding:14px;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:opacity 0.2s}
+    .btn:hover{opacity:0.85}
+    .footer-link{display:block;text-align:center;margin-top:20px;font-size:14px;color:var(--muted)}
+    .footer-link a{color:var(--accent-light);text-decoration:none}
+    .flash{padding:12px 16px;border-radius:8px;font-size:14px;margin-bottom:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#f87171}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a href="/" class="logo">Leado.</a>
+    <h1>Bon retour 👋</h1>
+    <p class="sub">Connecte-toi pour accéder à tes prospects.</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}<div class="flash">{{ msg }}</div>{% endfor %}
+    {% endwith %}
+    <form method="POST" action="/login">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" placeholder="toi@exemple.com" required />
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" placeholder="••••••••" required />
+      <button type="submit" class="btn">Se connecter →</button>
+    </form>
+    <div class="footer-link">Pas encore de compte ? <a href="/register">Créer un compte</a></div>
+  </div>
+</body>
+</html>

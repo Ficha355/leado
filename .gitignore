@@ -1,0 +1,54 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Flask
+instance/
+.webassets-cache
+
+# Database
+*.sqlite3
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Migrations (keep the folder, ignore auto-generated)
+# migrations/versions/
+
+# Static compiled assets
+static/dist/
