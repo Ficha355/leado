@@ -13,6 +13,7 @@ import logging
 import hashlib
 from typing import Any, Optional
 
+import requests
 import praw
 import anthropic
 from googleapiclient.discovery import build
@@ -258,6 +259,104 @@ def scrape_youtube(queries: list[str], limit: int = 3) -> list[dict]:
     return results
 
 
+# ── Step 2d — Hacker News scraping (Algolia public API) ──────────────────────
+
+HN_SEARCH_URL = "https://hn.algolia.com/api/v1/search"
+
+def scrape_hackernews(queries: list[str], limit: int = 10) -> list[dict]:
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:5]:
+        for tag in ("story", "comment"):
+            try:
+                resp = requests.get(
+                    HN_SEARCH_URL,
+                    params={
+                        "query": query,
+                        "tags": tag,
+                        "hitsPerPage": limit,
+                        "numericFilters": "created_at_i>1700000000",  # ~Nov 2023+
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                hits = resp.json().get("hits", [])
+            except Exception as exc:
+                log.debug("HN query=%r tag=%s: %s", query, tag, exc)
+                continue
+
+            for hit in hits:
+                oid = hit.get("objectID", "")
+                if oid in seen:
+                    continue
+                seen.add(oid)
+
+                if tag == "story":
+                    text = hit.get("story_text") or hit.get("title", "")
+                    url = hit.get("url") or f"https://news.ycombinator.com/item?id={oid}"
+                    title = hit.get("title", "")
+                else:
+                    text = hit.get("comment_text", "")
+                    url = f"https://news.ycombinator.com/item?id={oid}"
+                    title = hit.get("story_title", "")
+
+                snippet = text[:600].strip() if text else title
+                if not snippet:
+                    continue
+
+                results.append({
+                    "id": f"hn_{oid}",
+                    "source": "hackernews",
+                    "source_url": url,
+                    "author": hit.get("author", "unknown"),
+                    "title": title,
+                    "content_snippet": snippet,
+                })
+
+    return results
+
+
+# ── Step 2e — Indie Hackers scraping (via SerpApi site: filter) ───────────────
+
+def scrape_indiehackers(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Indie Hackers scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        site_query = f"site:indiehackers.com {query}"
+        try:
+            search = GoogleSearch({
+                "q": site_query,
+                "api_key": key,
+                "num": limit,
+            })
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"ih_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "indiehackers",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "indiehackers.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("IndieHackers query=%r: %s", query, exc)
+
+    return results
+
+
 # ── Step 3 — Claude batch scoring + outreach generation ──────────────────────
 
 SCORE_PROMPT = """\
@@ -398,6 +497,16 @@ def run_pipeline(product: str, sources: Optional[list] = None) -> list:
         google_leads = scrape_google(queries.get("reddit_queries", [product]))
         log.info("Google raw leads: %d", len(google_leads))
         raw.extend(google_leads)
+
+    if "hackernews" in sources:
+        hn_leads = scrape_hackernews(queries.get("reddit_queries", [product]))
+        log.info("HackerNews raw leads: %d", len(hn_leads))
+        raw.extend(hn_leads)
+
+    if "indiehackers" in sources:
+        ih_leads = scrape_indiehackers(queries.get("reddit_queries", [product]))
+        log.info("IndieHackers raw leads: %d", len(ih_leads))
+        raw.extend(ih_leads)
 
     if not raw:
         log.warning("No raw leads found — check API credentials.")
