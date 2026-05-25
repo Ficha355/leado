@@ -11,12 +11,13 @@ import os
 import json
 import logging
 import hashlib
-from typing import Any
+from typing import Any, Optional
 
 import praw
 import anthropic
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from serpapi import GoogleSearch
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # ── Clients (lazy-initialised so missing keys don't crash import) ─────────────
 
-def _reddit() -> praw.Reddit | None:
+def _reddit() -> Optional[praw.Reddit]:
     cid = os.environ.get("REDDIT_CLIENT_ID", "")
     secret = os.environ.get("REDDIT_CLIENT_SECRET", "")
     if not cid or not secret:
@@ -58,12 +59,20 @@ The user's product or service: <product>{product}</product>
 Generate search queries that will surface people who NEED this service RIGHT NOW \
 (not people learning about the topic or creating content about it).
 
+CRITICAL: Queries must target CLIENTS/BUYERS expressing a need — not freelancers, \
+not tutorials, not people discussing the industry. Think: "someone posting on a forum \
+because they are stuck and need to hire someone."
+
+Include a MIX of English AND French queries. French prospects are high priority — \
+add phrases like "je cherche", "quelqu'un pour", "besoin d'un", "je veux engager", \
+"monteur vidéo freelance", etc. adapted to the product.
+
 Return ONLY valid JSON — no markdown fences, no commentary:
 {{
-  "reddit_queries": ["<5-8 short search phrases for Reddit>"],
-  "youtube_queries": ["<3-5 short search phrases for YouTube>"],
+  "reddit_queries": ["<4-5 English phrases targeting buyers>", "<3-4 French phrases targeting buyers>"],
+  "youtube_queries": ["<2-3 English phrases>", "<2-3 French phrases>"],
   "target_subreddits": ["<8-12 subreddit names without r/, most relevant first>"],
-  "buyer_signals": ["<6-10 words/phrases that, if found, strongly suggest buying intent>"]
+  "buyer_signals": ["<6-10 words/phrases in EN and FR that strongly suggest buying intent>"]
 }}
 """
 
@@ -151,7 +160,42 @@ def scrape_reddit(queries: list[str], subreddits: list[str], limit: int = 5) -> 
     return results
 
 
-# ── Step 2b — YouTube scraping ────────────────────────────────────────────────
+# ── Step 2b — Google scraping via SerpApi ────────────────────────────────────
+
+def scrape_google(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Google scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        try:
+            search = GoogleSearch({"q": query, "api_key": key, "num": limit, "hl": "fr"})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                rid = r.get("link", "")
+                if rid in seen:
+                    continue
+                seen.add(rid)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"google_{hashlib.md5(rid.encode()).hexdigest()[:10]}",
+                    "source": "google",
+                    "source_url": rid,
+                    "author": r.get("displayed_link", "google"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("SerpApi query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2c — YouTube scraping ────────────────────────────────────────────────
 
 def _comment_to_raw(comment: dict, video_id: str, video_title: str) -> dict:
     snippet = comment["snippet"]["topLevelComment"]["snippet"]
@@ -217,20 +261,35 @@ def scrape_youtube(queries: list[str], limit: int = 3) -> list[dict]:
 # ── Step 3 — Claude batch scoring + outreach generation ──────────────────────
 
 SCORE_PROMPT = """\
-You are a sales qualification expert.
+You are a sales qualification expert with a very strict filter.
 
 The seller's product/service: <product>{product}</product>
 
-Below is a JSON array of candidate leads scraped from Reddit and YouTube.
+Below is a JSON array of candidate leads scraped from Reddit, YouTube, and Google.
+
+STRICT BUYER INTENT RULE — a lead is only valuable if the author is EXPLICITLY expressing \
+a personal need or desire to hire/buy RIGHT NOW. Discard anything that is:
+  - Educational content (tutorials, "how to", "tips for", industry discussions)
+  - A freelancer/provider advertising their own services
+  - General industry talk with no client need expressed
+  - News, reviews, or commentary about the field
+
+VALID buying signals (score 50+): "looking for", "need a", "want to hire", "recommend someone", \
+"help me find", "je cherche", "besoin d'un", "quelqu'un qui peut", "je veux engager", \
+"qui peut m'aider", "asap", "urgent", explicit project descriptions seeking a provider.
+
 For each lead evaluate:
-  - intent_score (0–100): How likely is this person to need and BUY this service RIGHT NOW?
-      80-100 = hot  (explicitly hiring, urgent pain, budget signals)
-      50-79  = warm (clear pain point, open to solutions)
-      0-49   = cold (tangential, informational, not a buyer)
+  - intent_score (0–100):
+      80-100 = hot  (explicitly hiring/seeking, urgent, clear project)
+      50-79  = warm (clear personal pain point, open to solutions)
+      1-49   = cold (tangential, informational, or provider — NOT a buyer)
+      0      = noise (tutorial, general discussion, no buying signal whatsoever)
   - intent_label: "hot" | "warm" | "cold"
-  - ai_summary: one sentence explaining WHY this is (or isn't) a strong lead
-  - suggested_reply: a 2-3 sentence outreach message. Friendly, specific to their situation, \
-zero corporate jargon. Written in the same language as the lead's post.
+  - ai_summary: one sentence on the specific buying signal found (or why it's cold/noise)
+  - suggested_reply: a 2-3 sentence outreach message, friendly, zero corporate jargon, \
+specific to their situation. Written in the SAME LANGUAGE as the lead's content.
+  - translated_snippet: if the lead content is in English, provide a French translation \
+of the content_snippet (max 200 chars). If already in French, return null.
 
 Return ONLY a valid JSON array — no markdown, no extra keys:
 [
@@ -239,7 +298,8 @@ Return ONLY a valid JSON array — no markdown, no extra keys:
     "intent_score": <number>,
     "intent_label": "<hot|warm|cold>",
     "ai_summary": "<string>",
-    "suggested_reply": "<string>"
+    "suggested_reply": "<string>",
+    "translated_snippet": "<string or null>"
   }},
   ...
 ]
@@ -267,7 +327,7 @@ def score_and_enrich(raw_leads: list[dict], product: str) -> list[dict]:
 
     msg = claude.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         messages=[{
             "role": "user",
             "content": SCORE_PROMPT.format(
@@ -278,7 +338,14 @@ def score_and_enrich(raw_leads: list[dict], product: str) -> list[dict]:
     )
 
     try:
-        scores: list[dict] = json.loads(msg.content[0].text)
+        raw_text = msg.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("```", 2)[1]
+            if raw_text.startswith("json"):
+                raw_text = raw_text[4:]
+            raw_text = raw_text.rsplit("```", 1)[0].strip()
+        scores: list[dict] = json.loads(raw_text)
     except (json.JSONDecodeError, IndexError, KeyError) as exc:
         log.error("Failed to parse scoring JSON from Claude: %s", exc)
         return []
@@ -297,7 +364,7 @@ def score_and_enrich(raw_leads: list[dict], product: str) -> list[dict]:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def run_pipeline(product: str, sources: list[str] | None = None) -> list[dict]:
+def run_pipeline(product: str, sources: Optional[list] = None) -> list:
     """
     Full pipeline: queries → scrape → score.
     Returns a list of enriched lead dicts ready to be saved to DB.
@@ -327,9 +394,20 @@ def run_pipeline(product: str, sources: list[str] | None = None) -> list[dict]:
         log.info("YouTube raw leads: %d", len(yt_leads))
         raw.extend(yt_leads)
 
+    if "google" in sources:
+        google_leads = scrape_google(queries.get("reddit_queries", [product]))
+        log.info("Google raw leads: %d", len(google_leads))
+        raw.extend(google_leads)
+
     if not raw:
         log.warning("No raw leads found — check API credentials.")
         return []
+
+    # Filter low-signal content (emojis, reactions, very short snippets)
+    raw = [
+        r for r in raw
+        if len(r.get("content_snippet", "").encode("ascii", "ignore")) > 25
+    ]
 
     # Deduplicate by content fingerprint (same author + same snippet prefix)
     seen_fp: set[str] = set()

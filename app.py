@@ -14,7 +14,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL") or "sqlite:///leado.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
@@ -161,6 +161,7 @@ def run_search():
             source_url=rl.get("source_url"),
             author=rl.get("author"),
             content_snippet=rl.get("content_snippet"),
+            translated_snippet=rl.get("translated_snippet"),
             intent_score=rl.get("intent_score", 0) / 100,  # store as 0.0–1.0
             intent_label=rl.get("intent_label", "cold"),
             ai_summary=rl.get("ai_summary"),
@@ -187,6 +188,7 @@ def _lead_to_dict(lead: Lead) -> dict:
         "source_url": lead.source_url,
         "author": lead.author,
         "content_snippet": lead.content_snippet,
+        "translated_snippet": lead.translated_snippet,
         "intent_score": round((lead.intent_score or 0) * 100),
         "intent_label": lead.intent_label,
         "ai_summary": lead.ai_summary,
@@ -329,7 +331,8 @@ def api_stats():
     })
 
 
+with app.app_context():
+    db.create_all()
+
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
     app.run(debug=True, port=5000)

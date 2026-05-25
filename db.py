@@ -52,6 +52,7 @@ class Lead(db.Model):
     source_url = db.Column(db.Text)
     author = db.Column(db.String(255))
     content_snippet = db.Column(db.Text)
+    translated_snippet = db.Column(db.Text)  # French translation if original is English
     intent_score = db.Column(db.Float)  # 0.0 - 1.0, scored by Claude
     intent_label = db.Column(db.String(50))  # hot | warm | cold
     ai_summary = db.Column(db.Text)
