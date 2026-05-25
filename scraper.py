@@ -725,6 +725,128 @@ def scrape_malt(queries: list[str], limit: int = 5) -> list[dict]:
     return results
 
 
+# ── Step 2n — Freelancer.com scraping (SerpApi site:freelancer.com/jobs) ──────
+
+def scrape_freelancer(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Freelancer scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        site_query = f"site:freelancer.com/jobs {query}"
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "freelancer.com/jobs" not in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"fl_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "freelancer",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "freelancer.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("Freelancer query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2o — ComeUp scraping (direct HTTP + BS4, FR service marketplace) ─────
+
+def scrape_comeup(queries: list[str], limit: int = 8) -> list[dict]:
+    from bs4 import BeautifulSoup
+
+    seen: set[str] = set()
+    results: list[dict] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    }
+
+    for query in queries[:4]:
+        try:
+            url = f"https://comeup.com/fr/search?q={requests.utils.quote(query)}"
+            r = requests.get(url, headers=headers, timeout=12)
+            if r.status_code != 200:
+                log.debug("ComeUp status=%d query=%r", r.status_code, query)
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            for link in soup.select('a[href*="/fr/service/"]')[:limit]:
+                href = link.get("href", "")
+                if not href or href in seen:
+                    continue
+                seen.add(href)
+                title = link.get_text(separator=" ", strip=True)
+                if len(title) < 15:
+                    continue
+                # ComeUp service titles start with "Je vais..." — keep as-is
+                # scoring will correctly identify these as service providers
+                full_url = f"https://comeup.com{href}" if href.startswith("/") else href
+                results.append({
+                    "id": f"cu_{hashlib.md5(href.encode()).hexdigest()[:10]}",
+                    "source": "comeup",
+                    "source_url": full_url,
+                    "author": "comeup.com",
+                    "title": title[:120],
+                    "content_snippet": title[:600],
+                })
+        except Exception as exc:
+            log.error("ComeUp query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2p — PeoplePerHour scraping (SerpApi site:peopleperhour.com) ─────────
+
+def scrape_peopleperhour(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping PeoplePerHour scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        site_query = (
+            f'site:peopleperhour.com '
+            f'("looking for" OR "needed" OR "need a" OR "je cherche") '
+            f'"{query}"'
+        )
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "peopleperhour.com" not in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"pph_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "peopleperhour",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "peopleperhour.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("PeoplePerHour query=%r: %s", query, exc)
+
+    return results
+
+
 # ── Step 3 — Claude batch scoring + outreach generation ──────────────────────
 
 SCORE_PROMPT = """\
@@ -915,6 +1037,21 @@ def run_pipeline(product: str, sources: Optional[list] = None) -> list:
         ma_leads = scrape_malt(queries.get("reddit_queries", [product]))
         log.info("Malt raw leads: %d", len(ma_leads))
         raw.extend(ma_leads)
+
+    if "freelancer" in sources:
+        fl_leads = scrape_freelancer(queries.get("reddit_queries", [product]))
+        log.info("Freelancer raw leads: %d", len(fl_leads))
+        raw.extend(fl_leads)
+
+    if "comeup" in sources:
+        cu_leads = scrape_comeup(queries.get("reddit_queries", [product]))
+        log.info("ComeUp raw leads: %d", len(cu_leads))
+        raw.extend(cu_leads)
+
+    if "peopleperhour" in sources:
+        pph_leads = scrape_peopleperhour(queries.get("reddit_queries", [product]))
+        log.info("PeoplePerHour raw leads: %d", len(pph_leads))
+        raw.extend(pph_leads)
 
     if not raw:
         log.warning("No raw leads found — check API credentials.")
