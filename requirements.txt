@@ -15,6 +15,7 @@ google-auth==2.49.2
 google-auth-httplib2==0.3.1
 google_search_results==2.4.2
 python-dotenv==1.2.1
+beautifulsoup4==4.14.3
 blinker==1.9.0
 click==8.1.8
 itsdangerous==2.2.0

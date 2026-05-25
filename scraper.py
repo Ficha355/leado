@@ -13,6 +13,7 @@ import logging
 import hashlib
 from typing import Any, Optional
 
+import re
 import requests
 import praw
 import anthropic
@@ -357,6 +358,373 @@ def scrape_indiehackers(queries: list[str], limit: int = 5) -> list[dict]:
     return results
 
 
+# ── Step 2f — Upwork scraping (SerpApi site: filter) ─────────────────────────
+
+def scrape_upwork(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Upwork scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        site_query = f"site:upwork.com/jobs {query}"
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "upwork.com/jobs" not in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"upwork_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "upwork",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "upwork.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("Upwork query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2g — Twitter/X scraping (Nitter public mirrors) ─────────────────────
+
+NITTER_INSTANCES = [
+    "https://nitter.poast.org",
+    "https://nitter.nl",
+    "https://nitter.1d4.us",
+    "https://nitter.kavin.rocks",
+]
+
+def _get_nitter_base() -> Optional[str]:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for instance in NITTER_INSTANCES:
+        try:
+            r = requests.get(instance, headers=headers, timeout=6)
+            if r.status_code == 200 and "nitter" in r.text.lower():
+                return instance
+        except Exception:
+            continue
+    return None
+
+def scrape_twitter(queries: list[str], limit: int = 10) -> list[dict]:
+    from bs4 import BeautifulSoup
+
+    base = _get_nitter_base()
+    if not base:
+        log.warning("No Nitter instance available — skipping Twitter scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    for query in queries[:4]:
+        try:
+            url = f"{base}/search?q={requests.utils.quote(query)}&f=tweets"
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            for item in soup.select(".timeline-item")[:limit]:
+                content_el = item.select_one(".tweet-content")
+                author_el = item.select_one(".username")
+                link_el = item.select_one(".tweet-link")
+                if not content_el:
+                    continue
+                text = content_el.get_text(strip=True)
+                author = author_el.get_text(strip=True) if author_el else "unknown"
+                href = link_el.get("href", "") if link_el else ""
+                tweet_url = f"https://twitter.com{href}" if href.startswith("/") else href
+                tid = hashlib.md5(f"{author}:{text[:80]}".encode()).hexdigest()[:12]
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                results.append({
+                    "id": f"twitter_{tid}",
+                    "source": "twitter",
+                    "source_url": tweet_url,
+                    "author": author,
+                    "title": "",
+                    "content_snippet": text[:600],
+                })
+        except Exception as exc:
+            log.debug("Twitter/Nitter query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2h — GitHub Issues/Discussions scraping (public API) ────────────────
+
+GH_SEARCH_URL = "https://api.github.com/search/issues"
+
+def scrape_github(queries: list[str], limit: int = 8) -> list[dict]:
+    seen: set[str] = set()
+    results: list[dict] = []
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Leado/1.0",
+    }
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if gh_token:
+        headers["Authorization"] = f"token {gh_token}"
+
+    for query in queries[:4]:
+        # Combine query with hiring/service-seeking signals
+        gh_query = f'"{query}" is:issue is:open in:body'
+        try:
+            resp = requests.get(
+                GH_SEARCH_URL,
+                params={"q": gh_query, "per_page": limit, "sort": "updated"},
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code == 403:
+                log.warning("GitHub API rate limit hit — skipping remaining queries.")
+                break
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+        except Exception as exc:
+            log.debug("GitHub query=%r: %s", query, exc)
+            continue
+
+        for item in items:
+            url = item.get("html_url", "")
+            if url in seen:
+                continue
+            seen.add(url)
+            body = (item.get("body") or "").strip()
+            snippet = body[:600] if body else item.get("title", "")
+            results.append({
+                "id": f"gh_{item['id']}",
+                "source": "github",
+                "source_url": url,
+                "author": item.get("user", {}).get("login", "unknown"),
+                "title": item.get("title", ""),
+                "content_snippet": snippet,
+            })
+
+    return results
+
+
+# ── Step 2i — Quora scraping (SerpApi site: filter) ──────────────────────────
+
+def scrape_quora(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Quora scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        site_query = f"site:quora.com {query}"
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "quora.com" not in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"quora_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "quora",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "quora.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("Quora query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2j — Codeur.com scraping (direct HTTP + BS4) ────────────────────────
+
+def scrape_codeur(queries: list[str], limit: int = 8) -> list[dict]:
+    from bs4 import BeautifulSoup
+
+    seen: set[str] = set()
+    results: list[dict] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    }
+
+    for query in queries[:4]:
+        try:
+            url = f"https://www.codeur.com/projects?q={requests.utils.quote(query)}"
+            r = requests.get(url, headers=headers, timeout=12)
+            if r.status_code != 200:
+                log.debug("Codeur status=%d query=%r", r.status_code, query)
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            for link in soup.select('a[href^="/projects/"]')[:limit]:
+                href = link.get("href", "")
+                if not href or href in seen or href == "/projects/":
+                    continue
+                seen.add(href)
+                text = link.get_text(separator=" ", strip=True)
+                if len(text) < 40:
+                    continue
+                # Title = everything up to the first metadata marker
+                title_match = re.split(r"\s+Il y a|\s+There are|\s+Posted", text)
+                title = title_match[0].strip()[:120]
+                # Body = text after "Vues " / "Views " where the actual brief starts
+                body_match = re.split(r"\d+\s*Vues?\s*|\d+\s*Views?\s*", text, maxsplit=1)
+                body = (body_match[1].strip() if len(body_match) > 1 else text)[:600]
+                results.append({
+                    "id": f"codeur_{hashlib.md5(href.encode()).hexdigest()[:10]}",
+                    "source": "codeur",
+                    "source_url": f"https://www.codeur.com{href}",
+                    "author": "codeur.com",
+                    "title": title,
+                    "content_snippet": body,
+                })
+        except Exception as exc:
+            log.error("Codeur query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2k — LinkedIn scraping (SerpApi site: filter on posts) ──────────────
+
+def scrape_linkedin(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping LinkedIn scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    buyer_prefixes = [
+        '"looking for"',
+        '"je cherche"',
+        '"hiring"',
+        '"besoin d\'un"',
+    ]
+
+    for query in queries[:3]:
+        for prefix in buyer_prefixes[:2]:
+            site_query = f'site:linkedin.com/posts {prefix} "{query}"'
+            try:
+                search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+                data = search.get_dict()
+                for r in data.get("organic_results", []):
+                    url = r.get("link", "")
+                    if url in seen or "linkedin.com" not in url:
+                        continue
+                    seen.add(url)
+                    snippet = r.get("snippet", "") or r.get("title", "")
+                    results.append({
+                        "id": f"li_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                        "source": "linkedin",
+                        "source_url": url,
+                        "author": r.get("title", "").split(" - ")[0].split("'s Post")[0].strip(),
+                        "title": r.get("title", ""),
+                        "content_snippet": snippet[:600],
+                    })
+            except Exception as exc:
+                log.error("LinkedIn query=%r: %s", site_query, exc)
+
+    return results
+
+
+# ── Step 2l — Product Hunt scraping (SerpApi site: filter on discussions) ────
+
+def scrape_producthunt(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Product Hunt scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        # Target PH posts/discussions where founders express needs — exclude product listings
+        site_query = (
+            f'site:producthunt.com "{query}" '
+            '("looking for" OR "need a" OR "hire" OR "je cherche" OR "seeking") '
+            '-inurl:products'
+        )
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "producthunt.com" not in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"ph_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "producthunt",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "producthunt.com"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("ProductHunt query=%r: %s", query, exc)
+
+    return results
+
+
+# ── Step 2m — Malt scraping (SerpApi — client briefs & job signals) ───────────
+
+def scrape_malt(queries: list[str], limit: int = 5) -> list[dict]:
+    key = os.environ.get("SERPAPI_KEY", "")
+    if not key:
+        log.warning("SERPAPI_KEY missing — skipping Malt scrape.")
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries[:4]:
+        # Target Malt blog/community pages — skip /profile/ (freelancer CVs, not clients)
+        site_query = (
+            f'site:malt.fr "{query}" '
+            '"je recherche" OR "je cherche" OR "nous cherchons" OR "recrutement" OR "mission" '
+            '-inurl:profile'
+        )
+        try:
+            search = GoogleSearch({"q": site_query, "api_key": key, "num": limit})
+            data = search.get_dict()
+            for r in data.get("organic_results", []):
+                url = r.get("link", "")
+                if url in seen or "malt.fr" not in url or "/profile/" in url:
+                    continue
+                seen.add(url)
+                snippet = r.get("snippet", "") or r.get("title", "")
+                results.append({
+                    "id": f"malt_{hashlib.md5(url.encode()).hexdigest()[:10]}",
+                    "source": "malt",
+                    "source_url": url,
+                    "author": r.get("displayed_link", "malt.fr"),
+                    "title": r.get("title", ""),
+                    "content_snippet": snippet[:600],
+                })
+        except Exception as exc:
+            log.error("Malt query=%r: %s", query, exc)
+
+    return results
+
+
 # ── Step 3 — Claude batch scoring + outreach generation ──────────────────────
 
 SCORE_PROMPT = """\
@@ -507,6 +875,46 @@ def run_pipeline(product: str, sources: Optional[list] = None) -> list:
         ih_leads = scrape_indiehackers(queries.get("reddit_queries", [product]))
         log.info("IndieHackers raw leads: %d", len(ih_leads))
         raw.extend(ih_leads)
+
+    if "upwork" in sources:
+        uw_leads = scrape_upwork(queries.get("reddit_queries", [product]))
+        log.info("Upwork raw leads: %d", len(uw_leads))
+        raw.extend(uw_leads)
+
+    if "twitter" in sources:
+        tw_leads = scrape_twitter(queries.get("reddit_queries", [product]))
+        log.info("Twitter raw leads: %d", len(tw_leads))
+        raw.extend(tw_leads)
+
+    if "github" in sources:
+        gh_leads = scrape_github(queries.get("reddit_queries", [product]))
+        log.info("GitHub raw leads: %d", len(gh_leads))
+        raw.extend(gh_leads)
+
+    if "quora" in sources:
+        qr_leads = scrape_quora(queries.get("reddit_queries", [product]))
+        log.info("Quora raw leads: %d", len(qr_leads))
+        raw.extend(qr_leads)
+
+    if "codeur" in sources:
+        co_leads = scrape_codeur(queries.get("reddit_queries", [product]))
+        log.info("Codeur raw leads: %d", len(co_leads))
+        raw.extend(co_leads)
+
+    if "linkedin" in sources:
+        li_leads = scrape_linkedin(queries.get("reddit_queries", [product]))
+        log.info("LinkedIn raw leads: %d", len(li_leads))
+        raw.extend(li_leads)
+
+    if "producthunt" in sources:
+        ph_leads = scrape_producthunt(queries.get("reddit_queries", [product]))
+        log.info("ProductHunt raw leads: %d", len(ph_leads))
+        raw.extend(ph_leads)
+
+    if "malt" in sources:
+        ma_leads = scrape_malt(queries.get("reddit_queries", [product]))
+        log.info("Malt raw leads: %d", len(ma_leads))
+        raw.extend(ma_leads)
 
     if not raw:
         log.warning("No raw leads found — check API credentials.")
