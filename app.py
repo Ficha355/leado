@@ -318,6 +318,24 @@ def stripe_webhook():
     return "", 200
 
 
+# ── Dev helpers (REMOVE before prod) ─────────────────────────────────────────
+
+@app.route("/dev/create-admin")
+def dev_create_admin():
+    existing = User.query.filter_by(email="admin@leado.io").first()
+    if existing:
+        return jsonify({"status": "already exists", "email": existing.email, "plan": existing.plan})
+    user = User(
+        email="admin@leado.io",
+        password_hash=generate_password_hash("leado2025"),
+        full_name="Admin",
+        plan="agency",
+    )
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({"status": "created", "email": user.email, "plan": user.plan, "search_limit": user.monthly_search_limit})
+
+
 # ── API ───────────────────────────────────────────────────────────────────────
 
 @app.route("/api/stats")
